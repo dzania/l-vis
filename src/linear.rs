@@ -947,9 +947,9 @@ pub fn demo_snapshot(limit: IssueLimit) -> WorkspaceSnapshot {
         fetched_at: now,
         source: SnapshotSource::Demo,
         viewer: Some(Viewer {
-            id: "demo-viewer".to_owned(),
-            name: "Demo Operator".to_owned(),
-            email: "demo@example.com".to_owned(),
+            id: "user-ada".to_owned(),
+            name: "Ada".to_owned(),
+            email: "ada@example.com".to_owned(),
         }),
         organization: Some(Organization {
             id: "demo-org".to_owned(),

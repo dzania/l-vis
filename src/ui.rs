@@ -15,8 +15,8 @@ use ratatui::prelude::{Color, Frame, Line, Modifier, Span, Style, Text};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::analytics::{
-    activity_series, assignee_load, heatmap, priority_buckets, status_buckets, throughput_values,
-    update_values,
+    activity_series, assignee_load, heatmap, metrics as issue_metrics, priority_buckets,
+    status_buckets, throughput_values, update_values,
 };
 use crate::app::{App, StatusKind, ViewMode};
 use crate::cli::ThemeMode;
@@ -25,6 +25,22 @@ use crate::linear::{Issue, Priority, WorkflowStateType};
 const TICK_RATE: Duration = Duration::from_millis(90);
 const HEATMAP_WEEKS: usize = 16;
 const SERIES_DAYS: usize = 35;
+
+const INK: Color = Color::Rgb(4, 8, 18);
+const PAPER: Color = Color::Rgb(230, 238, 255);
+const MUTED_DARK: Color = Color::Rgb(111, 123, 148);
+const MUTED_LIGHT: Color = Color::Rgb(82, 94, 116);
+const LABEL_DARK: Color = Color::Rgb(130, 152, 185);
+const LABEL_LIGHT: Color = Color::Rgb(88, 100, 124);
+const CYAN: Color = Color::Rgb(0, 229, 255);
+const BLUE: Color = Color::Rgb(86, 131, 255);
+const MAGENTA: Color = Color::Rgb(255, 74, 216);
+const YELLOW: Color = Color::Rgb(255, 211, 87);
+const GREEN: Color = Color::Rgb(62, 255, 143);
+const RED: Color = Color::Rgb(255, 85, 121);
+const ORANGE: Color = Color::Rgb(255, 143, 66);
+const VIOLET: Color = Color::Rgb(176, 122, 255);
+const DARK_GRID: Color = Color::Rgb(54, 66, 92);
 
 type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -39,19 +55,19 @@ impl Palette {
     fn from_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Auto => Self {
-                text: Color::Reset,
-                muted: Color::Gray,
-                label: Color::DarkGray,
+                text: PAPER,
+                muted: MUTED_DARK,
+                label: LABEL_DARK,
             },
             ThemeMode::Dark => Self {
-                text: Color::White,
-                muted: Color::Gray,
-                label: Color::Gray,
+                text: PAPER,
+                muted: MUTED_DARK,
+                label: LABEL_DARK,
             },
             ThemeMode::Light => Self {
-                text: Color::Black,
-                muted: Color::DarkGray,
-                label: Color::DarkGray,
+                text: INK,
+                muted: MUTED_LIGHT,
+                label: LABEL_LIGHT,
             },
         }
     }
@@ -126,9 +142,10 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => return Ok(true),
         KeyCode::Char('1') => app.set_view(ViewMode::Dashboard),
-        KeyCode::Char('2') => app.set_view(ViewMode::Issues),
-        KeyCode::Char('3') => app.set_view(ViewMode::Heatmap),
-        KeyCode::Char('4') => app.set_view(ViewMode::Charts),
+        KeyCode::Char('2') => app.set_view(ViewMode::MyIssues),
+        KeyCode::Char('3') => app.set_view(ViewMode::Issues),
+        KeyCode::Char('4') => app.set_view(ViewMode::Heatmap),
+        KeyCode::Char('5') => app.set_view(ViewMode::Charts),
         KeyCode::Char('?') => app.set_view(ViewMode::Help),
         KeyCode::Tab => app.next_view(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
@@ -175,6 +192,7 @@ fn draw(frame: &mut Frame<'_>, app: &App) {
     draw_header(frame, rows[0], app);
     match app.view {
         ViewMode::Dashboard => draw_dashboard(frame, rows[1], app),
+        ViewMode::MyIssues => draw_my_issues(frame, rows[1], app),
         ViewMode::Issues => draw_issues(frame, rows[1], app),
         ViewMode::Heatmap => draw_heatmap(frame, rows[1], app),
         ViewMode::Charts => draw_charts(frame, rows[1], app),
@@ -201,25 +219,23 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
     let tabs = [
         (ViewMode::Dashboard, "1 Dashboard"),
-        (ViewMode::Issues, "2 Issues"),
-        (ViewMode::Heatmap, "3 Heatmap"),
-        (ViewMode::Charts, "4 Charts"),
+        (ViewMode::MyIssues, "2 My"),
+        (ViewMode::Issues, "3 Issues"),
+        (ViewMode::Heatmap, "4 Heatmap"),
+        (ViewMode::Charts, "5 Charts"),
         (ViewMode::Help, "? Help"),
     ];
     let mut tab_spans = Vec::with_capacity(tabs.len() * 2 + 4);
-    tab_spans.push(Span::styled(
-        " L-VIS ",
-        Style::default().fg(Color::Black).bg(Color::Cyan),
-    ));
+    tab_spans.push(Span::styled(" L-VIS ", Style::default().fg(INK).bg(CYAN)));
     tab_spans.push(Span::styled(
         format!(" {spinner} "),
-        Style::default().fg(Color::Magenta),
+        Style::default().fg(MAGENTA),
     ));
     for (index, (mode, label)) in tabs.into_iter().enumerate() {
         let style = if mode == app.view {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
+                .fg(INK)
+                .bg(GREEN)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(chart_color(index))
@@ -234,7 +250,7 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Span::styled(app.source_label(), source_style(app)),
             Span::raw("  "),
             Span::styled("View ", palette.label_style()),
-            Span::styled(app.view.label(), Style::default().fg(Color::Cyan)),
+            Span::styled(app.view.label(), Style::default().fg(CYAN)),
             Span::raw("  "),
             Span::styled("Team ", palette.label_style()),
             Span::styled(app.team_filter_label(), palette.text_style()),
@@ -274,6 +290,168 @@ fn draw_dashboard(frame: &mut Frame<'_>, area: Rect, app: &App) {
     draw_focus_queue(frame, columns[2], app);
 }
 
+fn draw_my_issues(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let palette = Palette::from_mode(app.theme);
+    let my_issues = app.my_issues();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(11),
+            Constraint::Min(10),
+            Constraint::Length(8),
+        ])
+        .split(area);
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
+        .split(rows[0]);
+    let middle = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[1]);
+
+    draw_my_summary(frame, top[0], app, &my_issues, palette);
+    draw_bucket_bars(
+        frame,
+        top[1],
+        "My Workflow",
+        status_buckets(&my_issues),
+        palette,
+        1,
+    );
+    draw_personal_issue_queue(
+        frame,
+        middle[0],
+        "Todo / Active",
+        &my_issues,
+        palette,
+        false,
+    );
+    draw_personal_issue_queue(frame, middle[1], "Backlog", &my_issues, palette, true);
+
+    let series = activity_series(&my_issues, SERIES_DAYS, Utc::now().date_naive());
+    draw_activity_timeline(frame, rows[2], &series, palette, "My Activity");
+}
+
+fn draw_my_summary(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    issues: &[Issue],
+    palette: Palette,
+) {
+    let metrics = issue_metrics(issues, Utc::now());
+    let viewer = app
+        .snapshot
+        .viewer
+        .as_ref()
+        .map(|viewer| viewer.name.as_str())
+        .unwrap_or("unknown");
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Pilot      ", palette.label_style()),
+            Span::styled(viewer.to_owned(), palette.text_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Assigned   ", palette.label_style()),
+            Span::styled(metrics.total.to_string(), Style::default().fg(CYAN)),
+        ]),
+        Line::from(vec![
+            Span::styled("Open       ", palette.label_style()),
+            Span::styled(metrics.open.to_string(), Style::default().fg(YELLOW)),
+        ]),
+        Line::from(vec![
+            Span::styled("Done       ", palette.label_style()),
+            Span::styled(metrics.done.to_string(), Style::default().fg(GREEN)),
+        ]),
+        Line::from(vec![
+            Span::styled("Overdue    ", palette.label_style()),
+            Span::styled(
+                metrics.overdue.to_string(),
+                Style::default().fg(risk_color(metrics.overdue)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Team       ", palette.label_style()),
+            Span::styled(app.team_filter_label().to_owned(), palette.text_style()),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title("My Command Deck")),
+        area,
+    );
+}
+
+fn draw_personal_issue_queue(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &'static str,
+    issues: &[Issue],
+    palette: Palette,
+    backlog: bool,
+) {
+    let mut queue = issues
+        .iter()
+        .filter(|issue| {
+            if issue.is_done() {
+                return false;
+            }
+            let is_backlog = issue.state.kind == WorkflowStateType::Backlog;
+            is_backlog == backlog
+        })
+        .collect::<Vec<_>>();
+    queue.sort_by(|left, right| {
+        priority_sort_rank(left.priority)
+            .cmp(&priority_sort_rank(right.priority))
+            .then(left.due_date.cmp(&right.due_date))
+            .then(right.updated_at.cmp(&left.updated_at))
+    });
+
+    let max_items = area.height.saturating_sub(2) as usize;
+    let lines = queue
+        .iter()
+        .take(max_items)
+        .enumerate()
+        .map(|(index, issue)| personal_issue_line(index, issue, palette))
+        .collect::<Vec<_>>();
+    let content = if lines.is_empty() {
+        vec![Line::styled(
+            "No issues in this lane",
+            palette.muted_style(),
+        )]
+    } else {
+        lines
+    };
+
+    frame.render_widget(
+        Paragraph::new(content)
+            .block(Block::bordered().title(title))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn personal_issue_line(index: usize, issue: &Issue, palette: Palette) -> Line<'static> {
+    let due = issue
+        .due_date
+        .map(|date| date.format("%m-%d").to_string())
+        .unwrap_or_else(|| "----".to_owned());
+    Line::from(vec![
+        Span::styled(
+            format!("{:>2} ", index + 1),
+            Style::default().fg(chart_color(index)),
+        ),
+        Span::styled(
+            format!("{:<9}", issue.identifier),
+            priority_style(issue.priority).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!(" {:<5}", due), palette.muted_style()),
+        Span::styled(" ", palette.text_style()),
+        Span::styled(truncate(&issue.title, 44), palette.text_style()),
+    ])
+}
+
 fn draw_metrics_panel(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let palette = Palette::from_mode(app.theme);
     let metrics = app.metrics();
@@ -290,36 +468,30 @@ fn draw_metrics_panel(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let text = Text::from(vec![
         Line::from(vec![
             Span::styled("Total ", palette.label_style()),
-            Span::styled(metrics.total.to_string(), Style::default().fg(Color::Cyan)),
+            Span::styled(metrics.total.to_string(), Style::default().fg(CYAN)),
             Span::raw("  "),
             Span::styled("Open ", palette.label_style()),
-            Span::styled(metrics.open.to_string(), Style::default().fg(Color::Yellow)),
+            Span::styled(metrics.open.to_string(), Style::default().fg(YELLOW)),
         ]),
         Line::from(vec![
             Span::styled("Done ", palette.label_style()),
-            Span::styled(metrics.done.to_string(), Style::default().fg(Color::Green)),
+            Span::styled(metrics.done.to_string(), Style::default().fg(GREEN)),
             Span::raw("  "),
             Span::styled("Overdue ", palette.label_style()),
-            Span::styled(metrics.overdue.to_string(), Style::default().fg(Color::Red)),
+            Span::styled(metrics.overdue.to_string(), Style::default().fg(RED)),
         ]),
         Line::from(vec![
             Span::styled("Urgent ", palette.label_style()),
-            Span::styled(
-                metrics.urgent.to_string(),
-                Style::default().fg(Color::LightRed),
-            ),
+            Span::styled(metrics.urgent.to_string(), Style::default().fg(ORANGE)),
             Span::raw("  "),
             Span::styled("Updated today ", palette.label_style()),
-            Span::styled(
-                metrics.updated_today.to_string(),
-                Style::default().fg(Color::Blue),
-            ),
+            Span::styled(metrics.updated_today.to_string(), Style::default().fg(BLUE)),
         ]),
         Line::from(vec![
             Span::styled("Estimate ", palette.label_style()),
             Span::styled(
                 metrics.total_estimate.to_string(),
-                Style::default().fg(Color::Magenta),
+                Style::default().fg(MAGENTA),
             ),
             Span::raw("  "),
             Span::styled("Avg age ", palette.label_style()),
@@ -337,7 +509,7 @@ fn draw_metrics_panel(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(
         Gauge::default()
             .block(Block::bordered().title("Completion"))
-            .gauge_style(Style::default().fg(Color::Green))
+            .gauge_style(Style::default().fg(GREEN))
             .percent(metrics.completion_percent()),
         rows[1],
     );
@@ -363,7 +535,7 @@ fn draw_metrics_panel(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Line::from(vec![
                 Span::styled(truncate(&load.name, 16), palette.text_style()),
                 Span::raw(" "),
-                Span::styled(bar(load.open, 12), Style::default().fg(Color::Cyan)),
+                Span::styled(bar(load.open, 12), Style::default().fg(CYAN)),
                 Span::raw(format!(" {}", load.open)),
             ])
         })
@@ -407,13 +579,13 @@ fn draw_radar_panel(frame: &mut Frame<'_>, area: Rect, app: &App) {
             text.push(character);
         }
         let color = if row == center {
-            Color::Cyan
+            CYAN
         } else if row % 3 == 0 {
-            Color::Magenta
+            MAGENTA
         } else if row % 3 == 1 {
-            Color::Blue
+            BLUE
         } else {
-            Color::Green
+            GREEN
         };
         lines.push(Line::styled(text, Style::default().fg(color)));
     }
@@ -430,9 +602,8 @@ fn draw_focus_queue(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let palette = Palette::from_mode(app.theme);
     let mut issues = app.visible_issues();
     issues.sort_by(|left, right| {
-        left.priority
-            .rank()
-            .cmp(&right.priority.rank())
+        priority_sort_rank(left.priority)
+            .cmp(&priority_sort_rank(right.priority))
             .then(right.updated_at.cmp(&left.updated_at))
     });
     let items = issues
@@ -497,7 +668,7 @@ fn draw_issues(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_stateful_widget(
         List::new(items)
             .block(Block::bordered().title(format!("Issues ({})", visible.len())))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
+            .highlight_style(Style::default().fg(INK).bg(CYAN))
             .highlight_symbol("> "),
         columns[0],
         &mut state,
@@ -544,9 +715,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, area: Rect, issue: Option<&Issue>, t
     let mut lines = vec![
         Line::styled(
             format!("{}  {}", issue.identifier, issue.title),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
         labeled_line(
@@ -568,19 +737,9 @@ fn draw_issue_detail(frame: &mut Frame<'_>, area: Rect, issue: Option<&Issue>, t
             palette,
         ),
         labeled_line("Assignee", assignee, palette.text_style(), palette),
-        labeled_line("Due", &due, Style::default().fg(Color::Yellow), palette),
-        labeled_line(
-            "Estimate",
-            &estimate,
-            Style::default().fg(Color::Magenta),
-            palette,
-        ),
-        labeled_line(
-            "Labels",
-            &labels,
-            Style::default().fg(Color::Green),
-            palette,
-        ),
+        labeled_line("Due", &due, Style::default().fg(YELLOW), palette),
+        labeled_line("Estimate", &estimate, Style::default().fg(MAGENTA), palette),
+        labeled_line("Labels", &labels, Style::default().fg(GREEN), palette),
         labeled_line(
             "Updated",
             &issue.updated_at.format("%Y-%m-%d %H:%M").to_string(),
@@ -591,12 +750,7 @@ fn draw_issue_detail(frame: &mut Frame<'_>, area: Rect, issue: Option<&Issue>, t
     ];
 
     if let Some(url) = issue.url.as_ref() {
-        lines.push(labeled_line(
-            "URL",
-            url,
-            Style::default().fg(Color::Blue),
-            palette,
-        ));
+        lines.push(labeled_line("URL", url, Style::default().fg(BLUE), palette));
     }
 
     frame.render_widget(
@@ -639,9 +793,9 @@ fn draw_heatmap(frame: &mut Frame<'_>, area: Rect, app: &App) {
     lines.push(Line::from(vec![
         Span::styled("Less ", palette.label_style()),
         Span::styled(". ", palette.label_style()),
-        Span::styled("+ ", Style::default().fg(Color::Blue)),
-        Span::styled("* ", Style::default().fg(Color::Cyan)),
-        Span::styled("# ", Style::default().fg(Color::Green)),
+        Span::styled("+ ", Style::default().fg(BLUE)),
+        Span::styled("* ", Style::default().fg(CYAN)),
+        Span::styled("# ", Style::default().fg(GREEN)),
         Span::styled("More", palette.label_style()),
     ]));
 
@@ -687,7 +841,7 @@ fn draw_charts(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
 
     let series = activity_series(&visible, SERIES_DAYS, Utc::now().date_naive());
-    draw_activity_timeline(frame, rows[1], &series, palette);
+    draw_activity_timeline(frame, rows[1], &series, palette, "Activity Timeline");
 
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
@@ -746,6 +900,7 @@ fn draw_activity_timeline(
     area: Rect,
     series: &[crate::analytics::ActivityPoint],
     palette: Palette,
+    title: &'static str,
 ) {
     let width = usize::from(area.width).saturating_sub(18).clamp(12, 90);
     let created = series
@@ -769,14 +924,14 @@ fn draw_activity_timeline(
             Span::styled("Range      ", palette.label_style()),
             Span::styled(range, palette.text_style()),
         ]),
-        timeline_line("Created", &created, width, Color::Magenta, palette),
-        timeline_line("Updated", &updated, width, Color::Cyan, palette),
-        timeline_line("Done", &completed, width, Color::Green, palette),
+        timeline_line("Created", &created, width, MAGENTA, palette),
+        timeline_line("Updated", &updated, width, CYAN, palette),
+        timeline_line("Done", &completed, width, GREEN, palette),
     ];
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::bordered().title("Activity Timeline"))
+            .block(Block::bordered().title(title))
             .wrap(Wrap { trim: false }),
         area,
     );
@@ -825,11 +980,11 @@ fn draw_chart_summary(frame: &mut Frame<'_>, area: Rect, app: &App, palette: Pal
         ]),
         Line::from(vec![
             Span::styled("Open       ", palette.label_style()),
-            Span::styled(metrics.open.to_string(), Style::default().fg(Color::Yellow)),
+            Span::styled(metrics.open.to_string(), Style::default().fg(YELLOW)),
         ]),
         Line::from(vec![
             Span::styled("Done       ", palette.label_style()),
-            Span::styled(metrics.done.to_string(), Style::default().fg(Color::Green)),
+            Span::styled(metrics.done.to_string(), Style::default().fg(GREEN)),
         ]),
         Line::from(vec![
             Span::styled("Overdue    ", palette.label_style()),
@@ -926,16 +1081,7 @@ fn downsample_max(values: &[u64], width: usize) -> Vec<u64> {
 }
 
 fn chart_color(index: usize) -> Color {
-    const COLORS: [Color; 8] = [
-        Color::Cyan,
-        Color::Blue,
-        Color::Magenta,
-        Color::Yellow,
-        Color::Green,
-        Color::LightRed,
-        Color::LightBlue,
-        Color::LightMagenta,
-    ];
+    const COLORS: [Color; 8] = [CYAN, BLUE, MAGENTA, YELLOW, GREEN, ORANGE, VIOLET, RED];
     COLORS[index % COLORS.len()]
 }
 
@@ -944,13 +1090,11 @@ fn draw_help(frame: &mut Frame<'_>, area: Rect, theme: ThemeMode) {
     let lines = vec![
         Line::styled(
             "Keys",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
         Line::styled(
-            "1-4       switch dashboard, issues, heatmap, charts",
+            "1-5       dashboard, my issues, issues, heatmap, charts",
             palette.text_style(),
         ),
         Line::styled("tab       next view", palette.text_style()),
@@ -972,9 +1116,7 @@ fn draw_help(frame: &mut Frame<'_>, area: Rect, theme: ThemeMode) {
         Line::raw(""),
         Line::styled(
             "CLI",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
         ),
         Line::styled("l-vis sync", palette.text_style()),
         Line::styled("l-vis teams", palette.text_style()),
@@ -1001,9 +1143,9 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         app.query.clone()
     };
     let query_style = if app.editing_query {
-        Style::default().fg(Color::Black).bg(Color::Yellow)
+        Style::default().fg(INK).bg(YELLOW)
     } else {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(YELLOW)
     };
 
     let lines = vec![
@@ -1041,62 +1183,73 @@ fn labeled_line(label: &str, value: &str, value_style: Style, palette: Palette) 
 
 fn source_style(app: &App) -> Style {
     if app.is_demo() {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(YELLOW)
     } else {
-        Style::default().fg(Color::Green)
+        Style::default().fg(GREEN)
     }
 }
 
 fn status_style(kind: StatusKind) -> Style {
     match kind {
-        StatusKind::Info => Style::default().fg(Color::Cyan),
-        StatusKind::Success => Style::default().fg(Color::Green),
-        StatusKind::Warning => Style::default().fg(Color::Yellow),
-        StatusKind::Error => Style::default().fg(Color::Red),
+        StatusKind::Info => Style::default().fg(CYAN),
+        StatusKind::Success => Style::default().fg(GREEN),
+        StatusKind::Warning => Style::default().fg(YELLOW),
+        StatusKind::Error => Style::default().fg(RED),
     }
 }
 
 fn state_style(kind: &WorkflowStateType) -> Style {
     match kind {
-        WorkflowStateType::Backlog => Style::default().fg(Color::DarkGray),
-        WorkflowStateType::Unstarted => Style::default().fg(Color::Blue),
-        WorkflowStateType::Started => Style::default().fg(Color::Yellow),
-        WorkflowStateType::Completed => Style::default().fg(Color::Green),
-        WorkflowStateType::Canceled => Style::default().fg(Color::Red),
-        WorkflowStateType::Unknown(_) => Style::default().fg(Color::Gray),
+        WorkflowStateType::Backlog => Style::default().fg(DARK_GRID),
+        WorkflowStateType::Unstarted => Style::default().fg(BLUE),
+        WorkflowStateType::Started => Style::default().fg(YELLOW),
+        WorkflowStateType::Completed => Style::default().fg(GREEN),
+        WorkflowStateType::Canceled => Style::default().fg(RED),
+        WorkflowStateType::Unknown(_) => Style::default().fg(MUTED_DARK),
     }
 }
 
 fn priority_style(priority: Priority) -> Style {
     match priority {
-        Priority::Urgent => Style::default().fg(Color::Red),
-        Priority::High => Style::default().fg(Color::LightRed),
-        Priority::Normal => Style::default().fg(Color::Yellow),
-        Priority::Low => Style::default().fg(Color::Blue),
-        Priority::None => Style::default().fg(Color::DarkGray),
-        Priority::Unknown(_) => Style::default().fg(Color::Gray),
+        Priority::Urgent => Style::default().fg(RED),
+        Priority::High => Style::default().fg(ORANGE),
+        Priority::Normal => Style::default().fg(YELLOW),
+        Priority::Low => Style::default().fg(BLUE),
+        Priority::None => Style::default().fg(DARK_GRID),
+        Priority::Unknown(_) => Style::default().fg(MUTED_DARK),
+    }
+}
+
+fn priority_sort_rank(priority: Priority) -> u8 {
+    match priority {
+        Priority::Urgent => 0,
+        Priority::High => 1,
+        Priority::Normal => 2,
+        Priority::Low => 3,
+        Priority::None => 4,
+        Priority::Unknown(_) => 5,
     }
 }
 
 fn risk_color(count: usize) -> Color {
     match count {
-        0 => Color::Green,
-        1..=3 => Color::Yellow,
-        _ => Color::Red,
+        0 => GREEN,
+        1..=3 => YELLOW,
+        _ => RED,
     }
 }
 
 fn heatmap_color(count: usize, max_count: usize) -> Color {
     if count == 0 {
-        return Color::DarkGray;
+        return DARK_GRID;
     }
 
     let scaled = (count * 4) / max_count.max(1);
     match scaled {
-        0 | 1 => Color::Blue,
-        2 => Color::Cyan,
-        3 => Color::Green,
-        _ => Color::LightGreen,
+        0 | 1 => BLUE,
+        2 => CYAN,
+        3 => GREEN,
+        _ => YELLOW,
     }
 }
 
@@ -1121,7 +1274,7 @@ fn month_labels(rows: &[Vec<crate::analytics::HeatmapCell>]) -> Vec<Span<'static
         if month != previous_month {
             spans.push(Span::styled(
                 format!("{:<2}", cell.date.format("%b")),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(DARK_GRID),
             ));
             previous_month = month;
         } else {

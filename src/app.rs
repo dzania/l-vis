@@ -11,6 +11,7 @@ use crate::storage::IssueCache;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ViewMode {
     Dashboard,
+    MyIssues,
     Issues,
     Heatmap,
     Charts,
@@ -21,6 +22,7 @@ impl ViewMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Dashboard",
+            Self::MyIssues => "My Issues",
             Self::Issues => "Issues",
             Self::Heatmap => "Heatmap",
             Self::Charts => "Charts",
@@ -30,7 +32,8 @@ impl ViewMode {
 
     pub fn next(self) -> Self {
         match self {
-            Self::Dashboard => Self::Issues,
+            Self::Dashboard => Self::MyIssues,
+            Self::MyIssues => Self::Issues,
             Self::Issues => Self::Heatmap,
             Self::Heatmap => Self::Charts,
             Self::Charts | Self::Help => Self::Dashboard,
@@ -120,6 +123,17 @@ impl App {
         self.filtered
             .iter()
             .filter_map(|index| self.snapshot.issues.get(*index).cloned())
+            .collect()
+    }
+
+    pub fn my_issues(&self) -> Vec<Issue> {
+        let Some(viewer) = self.snapshot.viewer.as_ref() else {
+            return Vec::new();
+        };
+
+        self.visible_issues()
+            .into_iter()
+            .filter(|issue| issue_is_assigned_to_viewer(issue, viewer))
             .collect()
     }
 
@@ -467,6 +481,16 @@ fn issue_matches_team(issue: &Issue, team_filter: &str) -> bool {
         || issue.team.id.eq_ignore_ascii_case(team_filter)
 }
 
+fn issue_is_assigned_to_viewer(issue: &Issue, viewer: &crate::linear::Viewer) -> bool {
+    issue
+        .assignee
+        .as_ref()
+        .map(|assignee| {
+            assignee.id == viewer.id || assignee.email.eq_ignore_ascii_case(&viewer.email)
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cli::ThemeMode;
@@ -513,5 +537,28 @@ mod tests {
         app.clear_team_filter();
         assert_eq!(app.team_filter_label(), "all");
         assert_eq!(app.visible_issues().len(), all_count);
+    }
+
+    #[tokio::test]
+    async fn my_issues_match_demo_viewer() {
+        let app = App::bootstrap(AppConfig {
+            auth: None,
+            demo: true,
+            limit: IssueLimit::new(40).expect("valid test limit"),
+            theme: ThemeMode::Auto,
+            team_filter: None,
+        })
+        .await
+        .expect("demo app should start");
+
+        let my_issues = app.my_issues();
+        assert!(!my_issues.is_empty());
+        assert!(my_issues.iter().all(|issue| {
+            issue
+                .assignee
+                .as_ref()
+                .map(|assignee| assignee.email == "ada@example.com")
+                .unwrap_or(false)
+        }));
     }
 }
