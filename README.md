@@ -5,9 +5,12 @@ Ratatui for an animated TUI, talks to Linear through the GraphQL API with either
 personal API keys or OAuth tokens, and falls back to deterministic demo data
 when no credentials are available.
 
+![l-vis terminal demo](assets/l-vis-demo.gif)
+
 ## Features
 
 - Animated dashboard with workspace pulse, completion, overdue risk, load, and focus queue.
+- My Issues cockpit with personal backlog, todo/active lanes, workflow chart, and activity timeline.
 - Issue browser with keyboard filtering, selection, details, labels, due dates, and priorities.
 - Update heatmap for recent activity.
 - Status and priority charts plus throughput sparklines.
@@ -71,7 +74,11 @@ cargo run -- --demo sync
 
 ## TUI Keys
 
-- `1` to `4`: Dashboard, issues, heatmap, charts.
+- `1`: Dashboard.
+- `2`: My Issues.
+- `3`: Issue browser.
+- `4`: Heatmap.
+- `5`: Charts.
 - `tab`: Next view.
 - `j` / `k` or arrow keys: Move issue selection.
 - `/`: Filter issues by identifier, title, state, team, assignee, or label.
@@ -83,11 +90,3 @@ cargo run -- --demo sync
 - `d`: Toggle demo mode.
 - `?`: Help.
 - `q` or `esc`: Quit.
-
-## Verification
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-```
